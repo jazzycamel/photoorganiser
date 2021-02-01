@@ -284,13 +284,88 @@ class CopyThread(QThread):
         return self._progressRequest != 0
 
     def handle(self, id_: int):
-        pass
+        if self._cancelRequest:
+            return
+
+        self._mutex.lock()
+        oldCurrentId = self._currentId
+        self._currentId = id_
+        self._mutex.unlock()
+
+        self.started.emit(id_)
+        done = False
+        error = FileCopier.NoError
+        while not done:
+            self._mutex.lock()
+            request = self._requestQueue[id_]
+            overwriteAll = self._overwriteAllRequest
+            self._mutex.unlock()
+            copyRequest = request.request
+
+            n = CopyFileNode(None, id_, copyRequest, self)
+            n = CopyDirNode(n)
+            n = MoveNode(n)
+            n = RenameNode(n)
+            n = FollowLinksNode(n)
+            n = MakeLinksNode(n)
+            n = OverwriteNode(n, request.overwrite or overwriteAll)
+            n = SourceExistsNode(n)
+            n = CancelledNode(n, request.cancelled)
+
+            done = n.handle()
+            error = n.error()
+            del n
+
+            if done or copyRequest.copyFlags & FileCopier.NonInteractive:
+                done = True
+                if error != FileCopier.NoError:
+                    self.error.emit(id_, error, False)
+            else:
+                self._mutex.lock()
+                if self._stopRequest or error in self._skipAllError:
+                    done = True
+                    if not self._stopRequest:
+                        self.error.emit(id_, error, False)
+                else:
+                    self.error.emit(id_, error, True)
+                    self._waitingForInteraction = True
+                    self._interactionCondition.wait(self._mutex)
+                    if self._skipAllRequest:
+                        self._skipAllRequest = False
+                        self._skipAllError.add(error)
+                    self._waitingForInteraction = False
+                self._mutex.unlock()
+
+        self.finished.emit(id_, error != FileCopier.NoError)
+        self._mutex.lock()
+        self._currentId = oldCurrentId
+        self._requestQueue.pop(id_)
+        self._mutex.unlock()
 
     def lockCancelChildren(self, id_: int):
-        pass
+        l = QMutexLocker(self._mutex)
+        self._cancelChildren(id_)
 
     def renameChildren(self, id_: int):
-        pass
+        self._mutex.lock()
+        request = self._requestQueue[id_].request
+        oldCurrentId = self._currentId
+        self._currentId = id_
+        self._mutex.unlock()
+        self.started.emit(id_)
+
+        while len(request.childrenQueue):
+            self.renameChildren(request.childrenQueue.pop(-1))
+
+        if not request.dir:
+            destinationFileInfo = QFileInfo(request.dest)
+            self.emitProgress(id_, destinationFileInfo.size())
+
+        self.finished.emit(id_, False)
+        self._mutex.lock()
+        self._currentId = oldCurrentId
+        self._requestQueue.pop(id_)
+        self._mutex.unlock()
 
     def cancelChildRequests(self, id_: int):
         request = self._requestQueue[id_]
@@ -398,7 +473,31 @@ class CopyThread(QThread):
         self._progressRequest = 1
 
     def run(self):
-        pass
+        stop = False
+        while not stop:
+            self._mutex.lock()
+            if not len(self._requestQueue):
+                if self._stopRequest:
+                    self._mutex.unlock()
+                    stop = True
+                else:
+                    self._progressRequest = 0
+                    self._cancelRequest = False
+                    self._newCopyCondition.wait(self._mutex)
+                    if self._autoReset:
+                        self._overwriteAllRequest = False
+                        self._skipAllError.clear()
+                    self._mutex.unlock()
+            else:
+                if self._cancelRequest:
+                    self._requestQueue.clear()
+                    self._cancelRequest = False
+                    self.cancelled.emit()
+                    self._mutex.unlock()
+                else:
+                    self._mutex.unlock()
+                    self.handle(list(self._requestQueue.keys())[0])
+        self.deleteLater()
 
     @pyqtSlot()
     def _copierDestroyed(self):
@@ -408,7 +507,15 @@ class CopyThread(QThread):
         self._interactionCondition.wakeOne()
 
     def _cancelChildren(self, id_: int):
-        pass
+        try:
+            request = self._requestQueue[id_].request
+        except KeyError:
+            return
+
+        while len(request.childrenQueue):
+            childId = request.childrenQueue.pop(-1)
+            self._cancelChildren(childId)
+            self._requestQueue.pop(childId)
 
 
 class ChainNode(object):
@@ -450,7 +557,7 @@ class ChainNode(object):
             self._err = error
 
 
-class CancelNode(ChainNode):
+class CancelledNode(ChainNode):
     def __init__(self, nextInChain: ChainNode, cancelled: bool):
         super().__init__(nextInChain)
         self._cancelled = cancelled
@@ -567,6 +674,30 @@ class RenameNode(ChainNode):
                         )
                     return True
         return super().handle()
+
+
+class MoveNode(ChainNode):
+    def handle(self) -> bool:
+        request = self.request()
+        done = True
+
+        if not self.thread().isMoveError(self.currentId()):
+            done = super().handle()
+        if done and self.error() == FileCopier.NoError and request.move:
+            moveError = False
+            sourceFileInfo = QFileInfo(request.source)
+            sourceDir = sourceFileInfo.dir()
+            if sourceFileInfo.isDir() and not sourceFileInfo.isSymLink():
+                if not sourceDir.rmdir(sourceFileInfo.fileName()):
+                    moveError = True
+            elif not sourceDir.remove(sourceFileInfo.fileName()):
+                moveError = True
+
+            self.thread().setMoveError(self.currentId(), moveError)
+            if moveError:
+                self.setError(FileCopier.CannotRemoveSource)
+                done = False
+        return done
 
 
 class CopyDirNode(ChainNode):
