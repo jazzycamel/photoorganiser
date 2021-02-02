@@ -2,7 +2,7 @@ import os
 import os.path as osp
 import re
 from datetime import datetime
-from typing import Tuple, List
+from typing import List
 
 import exifread
 from PyQt5.QtCore import pyqtSlot
@@ -20,7 +20,7 @@ from PyQt5.QtWidgets import (
 )
 
 from photoorganiser.file_copier import FileCopier, _FileCopierWorker
-from photoorganiser.file_model import FileModel
+from photoorganiser.file_model import FileModel, FileModelRecord
 
 try:
     from icecream import ic
@@ -73,8 +73,25 @@ class PhotoOrganiserWidget(QWidget):
 
         self._file_model = FileModel(self)
         table_view = QTableView(self)
+        table_view.horizontalHeader().setStretchLastSection(True)
+        table_view.setSelectionBehavior(QTableView.SelectRows)
         table_view.setModel(self._file_model)
         l.addWidget(table_view)
+
+        dest_config_layout = QFormLayout()
+
+        dest_path_layout = QHBoxLayout()
+        self._dest_path_le = QLineEdit(self)
+        dest_path_layout.addWidget(self._dest_path_le)
+        dest_path_layout.addWidget(
+            QPushButton("Browse...", self, clicked=self._browse_for_dest_path)
+        )
+        dest_config_layout.addRow("Destination:", dest_path_layout)
+
+        l.addLayout(dest_config_layout)
+
+        self._copy_pb = QPushButton("Copy...", clicked=self._start_copy)
+        l.addWidget(self._copy_pb)
 
     @pyqtSlot()
     def _browse_for_source_path(self):
@@ -82,6 +99,13 @@ class PhotoOrganiserWidget(QWidget):
         if path is None:
             return
         self._source_path_le.setText(path)
+
+    @pyqtSlot()
+    def _browse_for_dest_path(self):
+        path = QFileDialog.getExistingDirectory(self, "Destination...")
+        if path is None:
+            return
+        self._dest_path_le.setText(path)
 
     @pyqtSlot()
     def _find_files(self):
@@ -98,7 +122,7 @@ class PhotoOrganiserWidget(QWidget):
 
         path_re = re.compile(f"^.*.{pattern}$")
 
-        self._file_list: List[Tuple[str, str, str]] = []
+        self._file_list: List[FileModelRecord] = []
         for root, directory_names, file_names in os.walk(source_path):
             for file_name in file_names:
                 if not path_re.match(file_name):
@@ -120,14 +144,12 @@ class PhotoOrganiserWidget(QWidget):
                     camera_model,
                     file_name,
                 )
+                self._file_list.append(FileModelRecord(file_name, full_path, dest_path))
 
-                self._file_list.append((file_name, full_path, dest_path))
-
-        # ic(self._file_list)
         self._file_model.set_file_data(self._file_list)
 
     @pyqtSlot()
-    def start_copy(self):
+    def _start_copy(self):
         pass
 
     # source_path = self._file_source_le.text()
