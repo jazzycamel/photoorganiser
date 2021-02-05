@@ -1,8 +1,7 @@
 from typing import Any, List
 from recordtype import recordtype
 
-from PyQt5.QtCore import QAbstractTableModel, QModelIndex, Qt, QObject
-
+from PyQt5.QtCore import QAbstractTableModel, QModelIndex, Qt
 
 FileModelRecord = recordtype(
     "FileModelRecord", ["file_name", "full_path", "dest_path", ("copy", True)]

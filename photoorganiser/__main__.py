@@ -15,7 +15,6 @@ from PyQt5.QtWidgets import (
     QHBoxLayout,
     QFileDialog,
     QFormLayout,
-    QComboBox,
     QTableView,
 )
 
@@ -116,6 +115,7 @@ class PhotoOrganiserWidget(QWidget):
         source_path = self._source_path_le.text()
         if not osp.exists(source_path) or not osp.isdir(source_path):
             ic("Source is not a directory...")
+            return
 
         formats = self._source_format_list.get_selected_formats()
         if "*" in formats:
@@ -123,8 +123,6 @@ class PhotoOrganiserWidget(QWidget):
 
         exts = "|".join([f"{ext.lower()}|{ext.upper()}" for ext in formats])
         path_re = re.compile(f"^.*.({exts})$")
-
-        ic(path_re)
 
         self._file_list: List[FileModelRecord] = []
         for root, directory_names, file_names in os.walk(source_path):
@@ -168,8 +166,12 @@ class PhotoOrganiserWidget(QWidget):
                 )
             )
 
+        self._progress_dialog.set_file_count(len(self._copy_list))
+        self._progress_dialog.show()
+
     @pyqtSlot(str)
     def copy_complete(self, uid: str):
+        self._progress_dialog.file_copy_finished()
         self._copy_list.remove(uid)
         if not len(self._copy_list):
             self._copy_pb.setEnabled(True)
@@ -177,14 +179,11 @@ class PhotoOrganiserWidget(QWidget):
     @pyqtSlot(str, int)
     def copy_error(self, uid: str, error: int):
         ic(uid, error)
+        self._progress_dialog.file_copy_error()
 
     @pyqtSlot(str, int, int)
     def copy_progress(self, uid: str, progress: int, total: int):
-        pass
-
-    # self._progress_bar.setEnabled(True)
-    # self._progress_bar.setRange(0, total)
-    # self._progress_bar.setValue(progress)
+        self._progress_dialog.set_file_progress(uid, progress, total)
 
 
 if __name__ == "__main__":
