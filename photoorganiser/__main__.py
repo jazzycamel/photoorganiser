@@ -19,8 +19,11 @@ from PyQt5.QtWidgets import (
     QTableView,
 )
 
-from photoorganiser.file_copier import FileCopier, _FileCopierWorker
+from photoorganiser.consts import RAW_FILE_EXTENSIONS
+from photoorganiser.file_copier import FileCopier
 from photoorganiser.file_model import FileModel, FileModelRecord
+from photoorganiser.format_list import FormatList
+from photoorganiser.progress_dialog import ProgressDialog
 
 try:
     from icecream import ic
@@ -49,6 +52,8 @@ class PhotoOrganiserWidget(QWidget):
             copy_progress=self.copy_progress,
         )
 
+        self._progress_dialog = ProgressDialog(self)
+
         l = QVBoxLayout(self)
 
         source_config_layout = QFormLayout()
@@ -61,9 +66,8 @@ class PhotoOrganiserWidget(QWidget):
         )
         source_config_layout.addRow("Source:", source_path_layout)
 
-        self._source_file_type_cb = QComboBox(self)
-        self._source_file_type_cb.addItems(["All Image Files", "Nikon *.NEF"])
-        source_config_layout.addRow("File Type:", self._source_file_type_cb)
+        self._source_format_list = FormatList(self)
+        source_config_layout.addRow("File Type:", self._source_format_list)
 
         source_config_layout.addRow(
             "", QPushButton("Find files...", self, clicked=self._find_files)
@@ -113,14 +117,14 @@ class PhotoOrganiserWidget(QWidget):
         if not osp.exists(source_path) or not osp.isdir(source_path):
             ic("Source is not a directory...")
 
-        source_file_type = self._source_file_type_cb.currentText()
-        if source_file_type.startswith("All"):
-            pattern = "(jpg|JPG|nef|NEF)"
-        else:
-            extension = source_file_type.split(".")[1]
-            pattern = f"({extension.lower()}|{extension.upper()})"
+        formats = self._source_format_list.get_selected_formats()
+        if "*" in formats:
+            formats = RAW_FILE_EXTENSIONS.values()
 
-        path_re = re.compile(f"^.*.{pattern}$")
+        exts = "|".join([f"{ext.lower()}|{ext.upper()}" for ext in formats])
+        path_re = re.compile(f"^.*.({exts})$")
+
+        ic(path_re)
 
         self._file_list: List[FileModelRecord] = []
         for root, directory_names, file_names in os.walk(source_path):
@@ -150,19 +154,25 @@ class PhotoOrganiserWidget(QWidget):
 
     @pyqtSlot()
     def _start_copy(self):
-        pass
+        dest_path = self._dest_path_le.text()
+        self._copy_pb.setDisabled(True)
 
-    # source_path = self._file_source_le.text()
-    # ic(source_path)
-    #
-    # dest_path = self._file_dest_le.text()
-    # ic(dest_path)
-    #
-    # self._file_copier.copy_file(source_path, dest_path)
+        self._copy_list: List[str] = []
+
+        for file_record in self._file_model.file_data():
+            if not file_record.copy:
+                continue
+            self._copy_list.append(
+                self._file_copier.copy_file(
+                    file_record.full_path, osp.join(dest_path, file_record.dest_path)
+                )
+            )
 
     @pyqtSlot(str)
     def copy_complete(self, uid: str):
-        ic(uid)
+        self._copy_list.remove(uid)
+        if not len(self._copy_list):
+            self._copy_pb.setEnabled(True)
 
     @pyqtSlot(str, int)
     def copy_error(self, uid: str, error: int):

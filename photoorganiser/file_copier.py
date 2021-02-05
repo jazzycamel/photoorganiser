@@ -9,6 +9,7 @@ from PyQt5.QtCore import (
     pyqtSlot,
     QFile,
     Q_ENUMS,
+    QFileInfo,
 )
 from PyQt5.QtWidgets import qApp
 
@@ -106,7 +107,15 @@ class _FileCopierWorker(QObject):
             self.copy_error.emit(uid, FileCopier.CannotOpenSourceFile)
             return
 
+        dest_file_info = QFileInfo(dest_file)
+        dest_dir = dest_file_info.absoluteDir()
+        if not dest_dir.exists():
+            if not dest_dir.mkpath(dest_dir.absolutePath()):
+                self.copy_error.emit(uid, FileCopier.CannotCreateDestinationDirectory)
+                return
+
         if not dest_file.open(QFile.WriteOnly):
+            ic(dest_path, dest_file.errorString())
             self.copy_error.emit(uid, FileCopier.CannotOpenDestinationFile)
             return
 

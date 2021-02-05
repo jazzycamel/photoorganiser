@@ -56,7 +56,10 @@ class FileModel(QAbstractTableModel):
             return True
         return super().setData(index, value, role)
 
-    def set_file_data(self, data):
+    def file_data(self) -> List[FileModelRecord]:
+        return self._data
+
+    def set_file_data(self, data: List[FileModelRecord]):
         self.beginResetModel()
         self._data = data
         self.endResetModel()
