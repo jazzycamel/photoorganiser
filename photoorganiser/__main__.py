@@ -205,9 +205,6 @@ if __name__ == "__main__":
     from PyQt5.QtWidgets import QApplication
     from sys import argv, exit
 
-    with Settings() as s:
-        ic(s["title"])
-
     a = QApplication(argv)
     a.setApplicationName("PhotoOrganiser")
     a.setApplicationDisplayName(a.applicationName())
