@@ -2,7 +2,7 @@ import os
 import os.path as osp
 import re
 from datetime import datetime
-from typing import List
+from typing import List, Dict
 
 import exifread
 from PyQt5.QtCore import pyqtSlot
@@ -23,6 +23,7 @@ from photoorganiser.file_copier import FileCopier
 from photoorganiser.file_model import FileModel, FileModelRecord
 from photoorganiser.format_list import FormatList
 from photoorganiser.progress_dialog import ProgressDialog
+from photoorganiser.settings import Settings
 
 try:
     from icecream import ic
@@ -96,6 +97,14 @@ class PhotoOrganiserWidget(QWidget):
         self._copy_pb = QPushButton("Copy...", clicked=self._start_copy)
         l.addWidget(self._copy_pb)
 
+        with Settings() as s:
+            if len(s["dest"]["path"]):
+                self._dest_path_le.setText(s["dest"]["path"])
+            if len(s["file_type"]["file_type"]):
+                self._source_format_list.set_selected_formats(
+                    s["file_type"]["file_type"]
+                )
+
     @pyqtSlot()
     def _browse_for_source_path(self):
         path = QFileDialog.getExistingDirectory(self, "Source...")
@@ -110,6 +119,9 @@ class PhotoOrganiserWidget(QWidget):
             return
         self._dest_path_le.setText(path)
 
+        with Settings() as s:
+            s["dest"]["path"] = path
+
     @pyqtSlot()
     def _find_files(self):
         source_path = self._source_path_le.text()
@@ -118,6 +130,9 @@ class PhotoOrganiserWidget(QWidget):
             return
 
         formats = self._source_format_list.get_selected_formats()
+        with Settings() as s:
+            s["file_type"]["file_type"] = formats
+
         if "*" in formats:
             formats = RAW_FILE_EXTENSIONS.values()
 
@@ -155,31 +170,31 @@ class PhotoOrganiserWidget(QWidget):
         dest_path = self._dest_path_le.text()
         self._copy_pb.setDisabled(True)
 
-        self._copy_list: List[str] = []
+        self._copy_dict: Dict[str, str] = {}
 
         for file_record in self._file_model.file_data():
             if not file_record.copy:
                 continue
-            self._copy_list.append(
-                self._file_copier.copy_file(
-                    file_record.full_path, osp.join(dest_path, file_record.dest_path)
-                )
-            )
 
-        self._progress_dialog.set_file_count(len(self._copy_list))
+            uid = self._file_copier.copy_file(
+                file_record.full_path, osp.join(dest_path, file_record.dest_path)
+            )
+            self._copy_dict[uid] = file_record
+
+        self._progress_dialog.set_file_dict(self._copy_dict)
         self._progress_dialog.show()
 
     @pyqtSlot(str)
     def copy_complete(self, uid: str):
         self._progress_dialog.file_copy_finished()
-        self._copy_list.remove(uid)
-        if not len(self._copy_list):
+        self._copy_dict.pop(uid)
+        if not len(self._copy_dict):
             self._copy_pb.setEnabled(True)
 
     @pyqtSlot(str, int)
     def copy_error(self, uid: str, error: int):
-        ic(uid, error)
-        self._progress_dialog.file_copy_error()
+        ic(uid, error, self._copy_dict[uid])
+        self._progress_dialog.file_copy_error(uid)
 
     @pyqtSlot(str, int, int)
     def copy_progress(self, uid: str, progress: int, total: int):
@@ -189,6 +204,9 @@ class PhotoOrganiserWidget(QWidget):
 if __name__ == "__main__":
     from PyQt5.QtWidgets import QApplication
     from sys import argv, exit
+
+    with Settings() as s:
+        ic(s["title"])
 
     a = QApplication(argv)
     a.setApplicationName("PhotoOrganiser")

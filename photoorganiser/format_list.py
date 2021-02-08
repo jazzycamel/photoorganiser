@@ -1,7 +1,13 @@
 from collections import OrderedDict
 from typing import Any, List
 
-from PyQt5.QtCore import QAbstractListModel, QModelIndex, Qt, QItemSelectionModel
+from PyQt5.QtCore import (
+    QAbstractListModel,
+    QModelIndex,
+    Qt,
+    QItemSelectionModel,
+    QItemSelection,
+)
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QListView
 
 from photoorganiser.consts import RAW_FILE_EXTENSIONS
@@ -51,3 +57,21 @@ class FormatList(QWidget):
             formats.append(self._model.data(index, role=_FormatModel.FORMAT_ROLE))
 
         return formats
+
+    def set_selected_formats(self, formats: List[str]):
+        self._view.selectionModel().clearSelection()
+
+        scrolled = False
+        item_selection = QItemSelection()
+        for format in formats:
+            matches = self._model.match(
+                self._model.index(0, 0), _FormatModel.FORMAT_ROLE, format
+            )
+            if not len(matches):
+                continue
+            item_selection.select(matches[0], matches[0])
+            if not scrolled:
+                self._view.scrollTo(matches[0], QListView.PositionAtTop)
+                scrolled = True
+
+        self._view.selectionModel().select(item_selection, QItemSelectionModel.Select)
